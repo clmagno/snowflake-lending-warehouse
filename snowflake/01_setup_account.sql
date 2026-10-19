@@ -1,0 +1,90 @@
+-- =============================================================================
+-- 01_setup_account.sql
+-- Warehouses, database, schemas, roles and a cost guardrail.
+-- Run once as ACCOUNTADMIN (or a role with equivalent privileges).
+-- =============================================================================
+USE ROLE ACCOUNTADMIN;
+
+-- ---------------------------------------------------------------------------
+-- Cost guardrail: suspend everything this project uses at 20 credits/month.
+-- ---------------------------------------------------------------------------
+CREATE RESOURCE MONITOR IF NOT EXISTS LENDING_MONTHLY_MONITOR
+  WITH CREDIT_QUOTA = 20
+  FREQUENCY = MONTHLY
+  START_TIMESTAMP = IMMEDIATELY
+  TRIGGERS
+    ON 75 PERCENT DO NOTIFY
+    ON 100 PERCENT DO SUSPEND;
+
+-- Separate warehouses so loading and transformation never queue behind
+-- each other, and each workload's cost shows up on its own line.
+CREATE WAREHOUSE IF NOT EXISTS LOADING_WH
+  WAREHOUSE_SIZE = XSMALL AUTO_SUSPEND = 60 AUTO_RESUME = TRUE INITIALLY_SUSPENDED = TRUE
+  RESOURCE_MONITOR = LENDING_MONTHLY_MONITOR
+  COMMENT = 'COPY INTO loads from the stage';
+
+CREATE WAREHOUSE IF NOT EXISTS TRANSFORM_WH
+  WAREHOUSE_SIZE = XSMALL AUTO_SUSPEND = 60 AUTO_RESUME = TRUE INITIALLY_SUSPENDED = TRUE
+  RESOURCE_MONITOR = LENDING_MONTHLY_MONITOR
+  COMMENT = 'dbt transformations';
+
+CREATE WAREHOUSE IF NOT EXISTS REPORTING_WH
+  WAREHOUSE_SIZE = XSMALL AUTO_SUSPEND = 60 AUTO_RESUME = TRUE INITIALLY_SUSPENDED = TRUE
+  RESOURCE_MONITOR = LENDING_MONTHLY_MONITOR
+  COMMENT = 'BI and ad-hoc queries';
+
+-- ---------------------------------------------------------------------------
+-- Database and schemas (raw -> staging -> marts)
+-- ---------------------------------------------------------------------------
+CREATE DATABASE IF NOT EXISTS LENDING;
+CREATE SCHEMA IF NOT EXISTS LENDING.RAW      COMMENT = 'Landed source data, loaded as-is by COPY INTO';
+CREATE SCHEMA IF NOT EXISTS LENDING.STAGING  COMMENT = 'dbt staging + intermediate models';
+CREATE SCHEMA IF NOT EXISTS LENDING.MARTS    COMMENT = 'dbt dimensional models and reporting marts';
+CREATE SCHEMA IF NOT EXISTS LENDING.GOVERNANCE COMMENT = 'Masking policies and tags';
+
+-- ---------------------------------------------------------------------------
+-- Role-based access control
+--   LOADER       writes RAW only
+--   TRANSFORMER  reads RAW, owns STAGING and MARTS (dbt runs as this role)
+--   ANALYST      reads MARTS only; PII is masked for this role
+--   PII_READER   granted on top of ANALYST to people allowed to see PII
+-- ---------------------------------------------------------------------------
+CREATE ROLE IF NOT EXISTS LOADER;
+CREATE ROLE IF NOT EXISTS TRANSFORMER;
+CREATE ROLE IF NOT EXISTS ANALYST;
+CREATE ROLE IF NOT EXISTS PII_READER;
+
+GRANT ROLE LOADER      TO ROLE SYSADMIN;
+GRANT ROLE TRANSFORMER TO ROLE SYSADMIN;
+GRANT ROLE ANALYST     TO ROLE SYSADMIN;
+GRANT ROLE PII_READER  TO ROLE SYSADMIN;
+
+GRANT USAGE ON WAREHOUSE LOADING_WH   TO ROLE LOADER;
+GRANT USAGE ON WAREHOUSE TRANSFORM_WH TO ROLE TRANSFORMER;
+GRANT USAGE ON WAREHOUSE REPORTING_WH TO ROLE ANALYST;
+
+GRANT USAGE ON DATABASE LENDING TO ROLE LOADER;
+GRANT USAGE ON DATABASE LENDING TO ROLE TRANSFORMER;
+GRANT USAGE ON DATABASE LENDING TO ROLE ANALYST;
+
+-- LOADER: create and write tables in RAW
+GRANT USAGE, CREATE TABLE, CREATE STAGE, CREATE FILE FORMAT ON SCHEMA LENDING.RAW TO ROLE LOADER;
+
+-- TRANSFORMER: read RAW, build STAGING and MARTS, own the masking policies
+GRANT USAGE ON SCHEMA LENDING.RAW TO ROLE TRANSFORMER;
+GRANT SELECT ON ALL TABLES IN SCHEMA LENDING.RAW TO ROLE TRANSFORMER;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA LENDING.RAW TO ROLE TRANSFORMER;
+GRANT USAGE, CREATE TABLE, CREATE VIEW ON SCHEMA LENDING.STAGING TO ROLE TRANSFORMER;
+GRANT USAGE, CREATE TABLE, CREATE VIEW ON SCHEMA LENDING.MARTS   TO ROLE TRANSFORMER;
+GRANT USAGE, CREATE MASKING POLICY ON SCHEMA LENDING.GOVERNANCE TO ROLE TRANSFORMER;
+GRANT APPLY MASKING POLICY ON ACCOUNT TO ROLE TRANSFORMER;
+
+-- ANALYST: read MARTS only
+GRANT USAGE ON SCHEMA LENDING.MARTS TO ROLE ANALYST;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA LENDING.MARTS TO ROLE ANALYST;
+GRANT SELECT ON FUTURE VIEWS  IN SCHEMA LENDING.MARTS TO ROLE ANALYST;
+
+-- Assign to your own user for the demo (replace <YOUR_USER>)
+-- GRANT ROLE LOADER      TO USER <YOUR_USER>;
+-- GRANT ROLE TRANSFORMER TO USER <YOUR_USER>;
+-- GRANT ROLE ANALYST     TO USER <YOUR_USER>;

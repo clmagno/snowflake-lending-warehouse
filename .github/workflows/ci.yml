@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint Python
+        run: ruff check data_generator loader docs
+
+      - name: Generate a small dataset
+        run: python data_generator/generate.py --borrowers 800 --out data/raw
+
+      - name: Load RAW into DuckDB
+        run: python loader/load.py --target duckdb
+
+      - name: dbt build (models + tests)
+        working-directory: dbt
+        env:
+          DBT_PROFILES_DIR: .
+        run: dbt build --target dev
+
+      - name: Snowflake SQL compiles
+        working-directory: dbt
+        env:
+          DBT_PROFILES_DIR: .
+          SNOWFLAKE_ACCOUNT: ci-placeholder
+          SNOWFLAKE_USER: ci-placeholder
+        # Renders every model in the Snowflake dialect without connecting.
+        # fct_payments needs a live connection for is_incremental(), so it is excluded.
+        run: dbt compile --target snowflake --no-introspect --no-populate-cache --exclude fct_payments

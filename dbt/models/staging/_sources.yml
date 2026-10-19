@@ -1,0 +1,29 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Extracts from the core lending system, loaded by loader/load.py.
+    schema: raw
+    config:
+      loaded_at_field: _loaded_at
+      freshness:
+        warn_after: {count: 24, period: hour}
+        error_after: {count: 48, period: hour}
+    tables:
+      - name: borrowers
+        description: One row per customer as delivered. Contains PII.
+        columns:
+          - name: borrower_id
+            data_tests: [not_null]
+      - name: loans
+        description: One row per loan account.
+        columns:
+          - name: loan_id
+            data_tests: [not_null]
+      - name: payments
+        description: >
+          Repayments, one file per month. Append-only: the source occasionally
+          re-sends a payment in a later extract, so payment_id is not unique here.
+        columns:
+          - name: payment_id
+            data_tests: [not_null]

@@ -1,0 +1,54 @@
+version: 2
+
+models:
+  - name: stg_lending__borrowers
+    description: Cleaned borrowers, one row per borrower_id. Contains PII.
+    columns:
+      - name: borrower_id
+        data_tests: [unique, not_null]
+      - name: credit_band
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [EXCELLENT, GOOD, FAIR, POOR]
+      - name: region_code
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [NSW, VIC, QLD, WA, SA, TAS, ACT, NT]
+
+  - name: stg_lending__loans
+    description: Cleaned loans with the contractual monthly instalment.
+    columns:
+      - name: loan_id
+        data_tests: [unique, not_null]
+      - name: borrower_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_lending__borrowers')
+                field: borrower_id
+      - name: product_code
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [HOME_LOAN_VARIABLE, HOME_LOAN_FIXED, PERSONAL_LOAN, CAR_LOAN]
+      - name: monthly_installment
+        description: Amortising instalment, P * r / (1 - (1 + r)^-n).
+        data_tests: [not_null]
+
+  - name: stg_lending__payments
+    description: Repayments de-duplicated on payment_id (latest extract wins).
+    columns:
+      - name: payment_id
+        data_tests: [unique, not_null]
+      - name: loan_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_lending__loans')
+                field: loan_id
+      - name: amount
+        data_tests: [not_null]

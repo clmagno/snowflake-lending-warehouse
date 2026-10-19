@@ -1,0 +1,31 @@
+name: lending_warehouse
+version: "1.0.0"
+config-version: 2
+profile: lending_warehouse
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # Reporting cut-off. Monthly snapshots are built up to this month end.
+  as_of_date: "2026-09-30"
+
+models:
+  lending_warehouse:
+    +query_tag: "lending:dbt"          # Snowflake only; used by snowflake/05_cost_monitoring.sql
+    staging:
+      +schema: staging
+      +materialized: view
+    intermediate:
+      +schema: staging
+      +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table
+
+tests:
+  lending_warehouse:
+    +severity: error

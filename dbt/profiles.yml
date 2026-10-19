@@ -1,0 +1,24 @@
+# Copy to ~/.dbt/profiles.yml (or point DBT_PROFILES_DIR at this folder after renaming).
+lending_warehouse:
+  target: dev
+  outputs:
+    # Local development and CI: no Snowflake account needed.
+    dev:
+      type: duckdb
+      path: ../data/lending.duckdb
+      threads: 4
+
+    # Snowflake: run as TRANSFORMER on TRANSFORM_WH.
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      # Either a password...
+      password: "{{ env_var('SNOWFLAKE_PASSWORD', '') }}"
+      # ...or key-pair authentication (preferred for service users):
+      # private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
+      role: TRANSFORMER
+      warehouse: TRANSFORM_WH
+      database: LENDING
+      schema: STAGING
+      threads: 8

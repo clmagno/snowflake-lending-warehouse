@@ -1,0 +1,61 @@
+version: 2
+
+models:
+  - name: fct_payments
+    description: One row per repayment, enriched with loan attributes. Incremental, merged on payment_id.
+    columns:
+      - name: payment_id
+        data_tests: [unique, not_null]
+      - name: loan_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_loan')
+                field: loan_id
+
+  - name: dim_borrower
+    description: >
+      One row per borrower. In Snowflake, first_name, last_name, full_name,
+      email and date_of_birth are masked for roles without PII access.
+    columns:
+      - name: borrower_id
+        data_tests: [unique, not_null]
+
+  - name: dim_loan
+    description: One row per loan with its current status from the latest monthly snapshot.
+    columns:
+      - name: loan_id
+        data_tests: [unique, not_null]
+      - name: borrower_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_borrower')
+                field: borrower_id
+
+  - name: fct_loan_monthly_snapshot
+    description: >
+      Month-end position of every loan: scheduled vs actual repayments,
+      arrears, days-past-due bucket and estimated balance. Clustered on
+      snapshot_month in Snowflake.
+    columns:
+      - name: loan_month_key
+        data_tests: [unique, not_null]
+      - name: dpd_bucket
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [CURRENT, 1-30, 31-60, 61-90, 90+]
+      - name: account_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [PERFORMING, ARREARS, DEFAULT, CLOSED]
+      - name: arrears_amount
+        data_tests: [not_null]
+
+  - name: mart_portfolio_monthly
+    description: Active book, arrears and 30+/90+ DPD rates by month and product family.
+
+  - name: mart_vintage_curves
+    description: Cumulative 90+ DPD rate by origination quarter and months on book.
